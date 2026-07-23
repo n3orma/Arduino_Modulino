@@ -35,6 +35,8 @@ ModulinoThermo thermo;
 
 void setup(){
   Serial.begin(9600);
+  while (!Serial) {};  // Wait for serial port to initialize
+  delay(100); 
 
   // Initialize Modulino I2C communication
   Modulino.begin();
@@ -65,5 +67,5 @@ void loop(){
   // Print relative humidity percentage
   Serial.print("Humidity (rH) is: ");
   Serial.println(humidity);
-
+  delay(1000);  // Wait for 1 second before next reading
 }
