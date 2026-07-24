@@ -16,6 +16,7 @@
 #include <Arduino_LPS22HB.h>
 #include <Arduino_HS300x.h>
 #include "Arduino_LTR381RGB.h"
+#include <SHT31.h>
 #include "Arduino.h"
 //#include <SE05X.h>  // need to provide a way to change Wire object
 
@@ -602,107 +603,6 @@ private:
   int initialized = 0;
 };
 
-class GXHT30Class {
-  public:
-    GXHT30Class(TwoWire &wire) : _wire(&wire) {}
-    bool begin() {
-      _wire->beginTransmission(0x45);
-      if (_wire->endTransmission() != 0) {
-        return false;
-      }
-      _wire->beginTransmission(0x45);
-      // Periodic Data Acquisition: Set the measurement mode to continuous high repeatability
-      //  with 1 Hz output data rate
-      _wire->write(0x21);
-      _wire->write(0x30);
-      _wire->endTransmission();
-      delay(1000); // Wait for the sensor to initialize
-      return true;
-    }
-    float readHumidity() {
-      updateSensorData();
-      uint16_t raw = (data[2] << 8) | data[3];
-      return (raw * 100.0) / 65535.0;
-    }
-    float readTemperature() {
-      updateSensorData();
-      uint16_t raw = (data[0] << 8) | data[1];
-      return (raw * 175.0) / 65535.0 - 45.0;
-    }
-private:
-    TwoWire* _wire;
-    uint8_t data[4];  // Array to hold the sensor data (temperature and humidity)
-    uint8_t temporaryData[6]; // Temporary array to hold the raw data read from the sensor
-    uint32_t updateTimeStamp = 0;
-
-    /**
-     * Calculates the CRC8 checksum for the given data using the polynomial 0x31.
-     * This function is used to verify the integrity of the data received from the GXHT30 sensor.
-     * @param data Pointer to the data array for which the CRC is to be calculated.
-     * @param len Length of the data array.
-     * @return The calculated CRC8 checksum.
-     */
-    uint8_t calculateCRC(uint8_t *data, uint8_t len) {
-      uint8_t crc = 0xFF;
-      for (uint8_t i = 0; i < len; i++) {
-        crc ^= data[i];
-        for (uint8_t j = 0; j < 8; j++) {
-          if (crc & 0x80) {
-            crc = (crc << 1) ^ 0x31;
-          } else {
-            crc <<= 1;
-          }
-        }
-      }
-      return crc;
-    }
-
-    /**
-     * Reads sensor data from the GXHT30 sensor. 
-     * This function sends a command to the sensor to initiate a measurement, 
-     * waits for the measurement to complete, and then reads the resulting data. 
-     * The data is stored in the `data` array and the timestamp of the last read is updated.
-     * 
-     * @return Returns 0 if the data was read successfully, or a non-zero error code if there was an issue with the I2C communication.
-     * @return Returns -1 if the CRC check fails, indicating that the data read from the sensor is invalid.
-     */
-    int updateSensorData() {
-      if(millis() - updateTimeStamp < 2000 && updateTimeStamp != 0) {
-        return 0; // Data is still fresh, no need to read again
-      }
-      Serial.println("Reading sensor data from GXHT30...");
-      _wire->beginTransmission(0x45);
-      // Fetch Period Data: Read buffer for periodic measurement mode
-      _wire->write(0xE0);
-      _wire->write(0x00);
-      auto result = _wire->endTransmission();
-      if (result != 0) {
-        return result;
-      }
-      delay(50); // Wait for the sensor to complete the measurement
-      // Read 6 bytes of data from the sensor: 2 bytes for temperature, 2 bytes for humidity, and 2 bytes for CRC checks
-      result = _wire->requestFrom(0x45, 6);
-      uint8_t temporaryData[6];
-      for (int i = 0; i < 6; i++) {
-        temporaryData[i] = _wire->read();
-      }
-      // Verify CRC for temperature and humidity
-      uint8_t calculatedTempCrc = calculateCRC(&temporaryData[0], 2);
-      uint8_t calculatedHumCrc = calculateCRC(&temporaryData[3], 2);
-
-      if (calculatedTempCrc != temporaryData[2] || calculatedHumCrc != temporaryData[5]) {
-        return -1; // CRC check failed
-      }
-
-      // Copy bytes 0-1 and 3-4 to the data array for temperature and humidity
-      memcpy(&data[0], &temporaryData[0], 2); // Temperature data
-      memcpy(&data[2], &temporaryData[3], 2); // Humidity data
-      
-      updateTimeStamp = millis();
-      return result;
-    }
-};
-
 class ModulinoThermo: public Module {
 public:
   ModulinoThermo(ModulinoHubPort* hubPort = nullptr)
@@ -720,10 +620,10 @@ public:
       }
       initialized = _sensor_hs300x->begin();
     } else {
-      if (_sensor_gxht30 == nullptr) {
-        _sensor_gxht30 = new GXHT30Class(*wire);
+      if (_sensor_sht31 == nullptr) {
+        _sensor_sht31 = new SHT31(0x45, wire);
       }
-      initialized = _sensor_gxht30->begin();
+      initialized = _sensor_sht31->begin();
     }
     __increaseI2CPriority();
     if (hubPort != nullptr) {
@@ -740,8 +640,9 @@ public:
         hubPort->select();
       }
       float ret = 0;
-      if (_sensor_gxht30 != nullptr) {
-        ret = _sensor_gxht30->readHumidity();
+      if (_sensor_sht31 != nullptr) {
+        updateSHT31();
+        ret = _sensor_sht31->getHumidity();
       } else if (_sensor_hs300x != nullptr) {
         ret = _sensor_hs300x->readHumidity();
       }
@@ -758,8 +659,9 @@ public:
         hubPort->select();
       }
       float ret = 0;
-      if (_sensor_gxht30 != nullptr) {
-        ret = _sensor_gxht30->readTemperature();
+      if (_sensor_sht31 != nullptr) {
+        updateSHT31();
+        ret = _sensor_sht31->getTemperature();
       } else if (_sensor_hs300x != nullptr) {
         ret = _sensor_hs300x->readTemperature();
       }
@@ -771,8 +673,18 @@ public:
     return 0;
   }
 private:
+  // Reads are cached for 2 seconds so calling getTemperature() and getHumidity()
+  // back to back doesn't trigger two blocking I2C transactions.
+  void updateSHT31() {
+    auto now = millis();
+    if (_lastSHT31Update == 0 || now - _lastSHT31Update >= 2000) {
+      _sensor_sht31->read();
+      _lastSHT31Update = now;
+    }
+  }
   HS300xClass* _sensor_hs300x = nullptr;
-  GXHT30Class* _sensor_gxht30 = nullptr;
+  SHT31* _sensor_sht31 = nullptr;
+  uint32_t _lastSHT31Update = 0;
   int initialized = 0;
 };
 
