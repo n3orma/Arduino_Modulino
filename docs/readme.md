@@ -231,7 +231,7 @@ void loop() {
 
 The examples folder is organized by Modulino type. Each module has its own folder with example sketches that demonstrate both basic and advanced usage (where applicable).
 
-You can explore the examples [here](../examples).
+You can explore the examples [here](./examples).
 
 ## Stepper Notes (ModulinoMotors)
 
@@ -245,14 +245,14 @@ You can explore the examples [here](../examples).
 
 ### Utilities
 
-In the [Utilities](../examples/Utilities) folder, you will find programs designed to help you manage and manipulate the Modulino:
+In the [Utilities](./examples/Utilities) folder, you will find programs designed to help you manage and manipulate the Modulino:
 
-- [AddressChanger](../examples/Utilities/AddressChanger/): This program allows you to change the I2C address of a Modulino module. It’s helpful when you need to reassign addresses to avoid conflicts or organize your I2C network.
+- [AddressChanger](./examples/Utilities/AddressChanger/): This program allows you to change the I2C address of a Modulino module. It’s helpful when you need to reassign addresses to avoid conflicts or organize your I2C network.
 
 ## API
 
-The API documentation can be found [here](./api.md).
+The API documentation can be found [here](./docs/api.md).
 
 ## License
 
-This library is released under the [MPL-2.0 license](../LICENSE).
+This library is released under the [MPL-2.0 license](./LICENSE).
